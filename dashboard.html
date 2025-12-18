@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Stock Anomaly Detection</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <!-- Top Navigation Header -->
+    <nav style="background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%); padding: 15px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); position: sticky; top: 0; z-index: 1000;">
+        <div class="container" style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <span style="font-size: 1.8em;">📈</span>
+                <span style="color: white; font-size: 1.3em; font-weight: 700;">Stock Analytics</span>
+            </div>
+            <div style="display: flex; gap: 20px;">
+                <a href="/" style="color: white; text-decoration: none; font-weight: 600; padding: 8px 16px; border-radius: 6px; transition: background 0.3s;" onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='transparent'">Home</a>
+                <a href="/dashboard" style="color: white; text-decoration: none; font-weight: 600; padding: 8px 16px; border-radius: 6px; transition: background 0.3s; background: rgba(255,255,255,0.2);">Dashboard</a>
+                <a href="/spark-ui" style="color: white; text-decoration: none; font-weight: 600; padding: 8px 16px; border-radius: 6px; transition: background 0.3s;" onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='transparent'">Spark Monitor</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container" style="margin-top: 30px;">
+        <!-- Header -->
+        <header class="header">
+            <h1>📊 Complete Analysis Dashboard</h1>
+            <p class="subtitle">Stock Price Analysis, Predictions & Visualizations</p>
+            
+            <!-- Stock Selector -->
+            <div style="margin-top: 25px;">
+                <form action="/dashboard" method="get" style="display: flex; gap: 15px; justify-content: center; align-items: center; flex-wrap: wrap;">
+                    <label for="stock" style="font-weight: 600; color: #475569; font-size: 1.1em;">Select Stock:</label>
+                    <select name="stock" id="stock" style="padding: 12px 20px; border: 2px solid #cbd5e1; border-radius: 8px; font-size: 1em; background: white; color: #0f172a; min-width: 200px; cursor: pointer; transition: all 0.3s;" onchange="this.form.submit()">
+                        <option value="GOOGL" {{ 'selected' if selected_stock == 'GOOGL' else '' }}>GOOGL - Alphabet (Google)</option>
+                        <option value="AAPL" {{ 'selected' if selected_stock == 'AAPL' else '' }}>AAPL - Apple</option>
+                        <option value="AMZN" {{ 'selected' if selected_stock == 'AMZN' else '' }}>AMZN - Amazon</option>
+                        <option value="MSFT" {{ 'selected' if selected_stock == 'MSFT' else '' }}>MSFT - Microsoft</option>
+                        <option value="TSLA" {{ 'selected' if selected_stock == 'TSLA' else '' }}>TSLA - Tesla</option>
+                        <option value="META" {{ 'selected' if selected_stock == 'META' else '' }}>META - Meta Platforms</option>
+                        <option value="NFLX" {{ 'selected' if selected_stock == 'NFLX' else '' }}>NFLX - Netflix</option>
+                        <option value="NVDA" {{ 'selected' if selected_stock == 'NVDA' else '' }}>NVDA - NVIDIA</option>
+                        <option value="AMD" {{ 'selected' if selected_stock == 'AMD' else '' }}>AMD - Advanced Micro Devices</option>
+                        <option value="INTC" {{ 'selected' if selected_stock == 'INTC' else '' }}>INTC - Intel</option>
+                    </select>
+                    <button type="submit" class="btn btn-primary" style="padding: 12px 24px;">📊 Analyze</button>
+                </form>
+            </div>
+        </header>
+
+        <!-- Date Range Windowing Section -->
+        <section class="windowing-section">
+            <div class="windowing-card">
+                <h2>📅 Time Window Selection</h2>
+                <p>Select a date range to filter and visualize specific time periods</p>
+                
+                <form id="windowForm" class="window-form">
+                    <div class="window-inputs">
+                        <div class="input-group">
+                            <label for="startDate">Start Date:</label>
+                            <input type="date" id="startDate" name="start_date" 
+                                   value="{{ processing_stats.date_range.split(' to ')[0] if processing_stats else '' }}" required>
+                        </div>
+                        
+                        <div class="input-group">
+                            <label for="endDate">End Date:</label>
+                            <input type="date" id="endDate" name="end_date" 
+                                   value="{{ processing_stats.date_range.split(' to ')[1] if processing_stats else '' }}" required>
+                        </div>
+                        
+                        <div class="input-group">
+                            <label for="windowType">Window Type:</label>
+                            <select id="windowType" name="window_type">
+                                <option value="daily">Daily</option>
+                                <option value="weekly">Weekly</option>
+                                <option value="monthly">Monthly</option>
+                            </select>
+                        </div>
+                        
+                        <div class="input-group">
+                            <button type="submit" class="btn btn-primary">🔍 Apply Window</button>
+                            <button type="button" id="resetWindow" class="btn btn-outline">↺ Reset</button>
+                        </div>
+                    </div>
+                </form>
+                
+                <div id="windowStatus" class="window-status"></div>
+            </div>
+        </section>
+
+        <!-- Success Banner -->
+        <section class="success-banner">
+            <div class="success-content">
+                <h2>✅ Analysis Complete!</h2>
+                <p>Your stock data has been fully processed, analyzed, and visualized below.</p>
+            </div>
+        </section>
+
+        <!-- Processing Log Section (Persistent) -->
+        {% if processing_log %}
+        <section class="processing-section">
+            <h2>📋 Processing Summary</h2>
+            <div class="processing-log-dashboard">
+                <h3>Completed Steps:</h3>
+                <ul>
+                    {% for log in processing_log %}
+                    <li>{{ log }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- Price Prediction Section -->
+        {% if predictions %}
+        <section class="prediction-section">
+            <h2>🔮 Stock Price Predictions (Next 7 Days)</h2>
+            <div class="prediction-info">
+                <div class="prediction-card">
+                    <h3>📈 Trend Direction</h3>
+                    <p class="prediction-value {{ 'trend-up' if predictions.trend == 'Upward' else 'trend-down' }}">
+                        {{ predictions.trend }}
+                    </p>
+                </div>
+                <div class="prediction-card">
+                    <h3>🎯 Confidence Level</h3>
+                    <p class="prediction-value">{{ predictions.confidence }}</p>
+                </div>
+                <div class="prediction-card">
+                    <h3>📊 Volatility</h3>
+                    <p class="prediction-value">${{ predictions.volatility }}</p>
+                </div>
+            </div>
+            <div class="prediction-table-wrapper">
+                <table class="prediction-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Predicted Price</th>
+                            <th>Change from Last</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for i in range(predictions.dates|length) %}
+                        <tr>
+                            <td><strong>{{ predictions.dates[i] }}</strong></td>
+                            <td class="price-cell">${{ "%.2f"|format(predictions.prices[i]) }}</td>
+                            <td class="{{ 'positive' if i == 0 or predictions.prices[i] > predictions.prices[i-1] else 'negative' }}">
+                                {% if i > 0 %}
+                                    {{ "%.2f"|format(((predictions.prices[i] - predictions.prices[i-1]) / predictions.prices[i-1] * 100)) }}%
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- Summary Section - Tesla Style Header Stats -->
+        <section class="summary-section">
+            <div class="tesla-stats-header">
+                <div class="stock-title">
+                    <div class="stock-icon">📈</div>
+                    <div class="stock-info">
+                        <h1>STOCK ANALYTICS</h1>
+                        <p class="stock-subtitle">Real-time Price Monitoring and Anomaly Detection</p>
+                    </div>
+                </div>
+                <div class="key-stats-grid">
+                    <div class="key-stat-box">
+                        <div class="stat-value highlight-price">${{ "%.1f"|format(summary.max_price) }}</div>
+                        <div class="stat-label">Highest Price</div>
+                    </div>
+                    <div class="key-stat-box">
+                        <div class="stat-value highlight-price">${{ "%.1f"|format(summary.min_price) }}</div>
+                        <div class="stat-label">Lowest Price</div>
+                    </div>
+                </div>
+            </div>
+            
+            <h2>� Monthly Summary</h2>
+            <div class="monthly-summary">
+                <div class="month-box">
+                    <div class="month-name">{{ processing_stats.date_range.split(' to ')[0][:7] if processing_stats else 'Start' }}</div>
+                    <div class="month-value">${{ "%.0f"|format(summary.average_price) }}</div>
+                    <div class="month-label">Avg Price</div>
+                </div>
+                <div class="month-box">
+                    <div class="month-name">{{ processing_stats.date_range.split(' to ')[1][:7] if processing_stats else 'End' }}</div>
+                    <div class="month-value">{{ summary.anomaly_count }}</div>
+                    <div class="month-label">Anomalies</div>
+                </div>
+            </div>
+            
+            <h2>📈 Additional Statistics</h2>
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <span class="summary-icon">💰</span>
+                    <h3>Average Price</h3>
+                    <p class="summary-value">${{ "%.2f"|format(summary.average_price) }}</p>
+                </div>
+                <div class="summary-card">
+                    <span class="summary-icon">📊</span>
+                    <h3>Total Volume</h3>
+                    <p class="summary-value">{{ "{:,}".format(summary.total_volume) }}</p>
+                </div>
+                <div class="summary-card anomaly-card">
+                    <span class="summary-icon">⚠️</span>
+                    <h3>Anomalies Detected</h3>
+                    <p class="summary-value">{{ summary.anomaly_count }}</p>
+                </div>
+                <div class="summary-card">
+                    <span class="summary-icon">📈</span>
+                    <h3>Price Range</h3>
+                    <p class="summary-value">${{ "%.2f"|format(summary.min_price) }} - ${{ "%.2f"|format(summary.max_price) }}</p>
+                </div>
+            </div>
+            <div class="summary-info">
+                <p><strong>Detection Threshold:</strong> {{ threshold }}% change</p>
+                <p><strong>Total Records:</strong> {{ total_records }}</p>
+            </div>
+        </section>
+
+        <!-- Processing Statistics Section -->
+        {% if processing_stats %}
+        <section class="processing-section">
+            <h2>📊 Data Processing Statistics</h2>
+            <div class="processing-grid">
+                <div class="processing-card">
+                    <span class="processing-icon">📅</span>
+                    <h3>Date Range</h3>
+                    <p>{{ processing_stats.date_range }}</p>
+                </div>
+                <div class="processing-card">
+                    <span class="processing-icon">🔢</span>
+                    <h3>Total Records</h3>
+                    <p>{{ processing_stats.total_records }}</p>
+                </div>
+                <div class="processing-card">
+                    <span class="processing-icon">📊</span>
+                    <h3>Avg Daily Volume</h3>
+                    <p>{{ processing_stats.avg_volume }}</p>
+                </div>
+                <div class="processing-card">
+                    <span class="processing-icon">📈</span>
+                    <h3>Price Volatility</h3>
+                    <p>{{ processing_stats.price_volatility }}</p>
+                </div>
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- Chart Section -->
+        <section class="chart-section">
+            <div class="chart-header">
+                <h2>📊 Stock Analytics Dashboard</h2>
+                <p class="chart-description">
+                    <strong>Professional visualizations</strong> showing daily close prices, high/low trends, trading volume, 
+                    percentage changes, and future predictions. 
+                    <span class="hover-hint">Hover over charts for detailed information.</span>
+                </p>
+            </div>
+            <div id="stockChart" class="chart-container"></div>
+        </section>
+
+        <!-- Data Sample Section -->
+        {% if sample_data_head %}
+        <section class="data-sample-section">
+            <h2>🔍 Processed Data Preview</h2>
+            <p class="section-description">Sample of cleaned and normalized data (showing first 10 rows)</p>
+            
+            <div class="data-table-wrapper">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Open</th>
+                            <th>High</th>
+                            <th>Low</th>
+                            <th>Close</th>
+                            <th>Volume</th>
+                            <th>% Change</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in sample_data_head %}
+                        <tr class="{{ 'highlight-row' if row.IsAnomaly else '' }}">
+                            <td>{{ row.Date }}</td>
+                            <td>${{ "%.2f"|format(row.Open) }}</td>
+                            <td>${{ "%.2f"|format(row.High) }}</td>
+                            <td>${{ "%.2f"|format(row.Low) }}</td>
+                            <td><strong>${{ "%.2f"|format(row.Close) }}</strong></td>
+                            <td>{{ "{:,}".format(row.Volume|int) }}</td>
+                            <td class="{{ 'positive' if row.PercentChange > 0 else 'negative' if row.PercentChange < 0 else '' }}">
+                                {{ "%.2f"|format(row.PercentChange) }}%
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- Anomalies Section -->
+        <section class="anomalies-section">
+            <h2>🚨 Detected Anomalies</h2>
+            
+            {% if anomalies|length > 0 %}
+            <div class="anomalies-table-wrapper">
+                <table class="anomalies-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Close Price</th>
+                            <th>Previous Close</th>
+                            <th>Change (%)</th>
+                            <th>Type</th>
+                            <th>Volume</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for anomaly in anomalies %}
+                        <tr class="anomaly-row {{ 'spike' if anomaly.AnomalyType == 'Spike' else 'drop' }}">
+                            <td>{{ anomaly.Date }}</td>
+                            <td>${{ "%.2f"|format(anomaly.Close) }}</td>
+                            <td>${{ "%.2f"|format(anomaly.PrevClose) if anomaly.PrevClose else 'N/A' }}</td>
+                            <td class="percent-change">
+                                {{ "%.2f"|format(anomaly.PercentChange) }}%
+                            </td>
+                            <td>
+                                <span class="badge {{ 'badge-spike' if anomaly.AnomalyType == 'Spike' else 'badge-drop' }}">
+                                    {{ anomaly.AnomalyType }}
+                                </span>
+                            </td>
+                            <td>{{ "{:,}".format(anomaly.Volume|int) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="no-anomalies">
+                <p>✓ No anomalies detected in the dataset with the current threshold ({{ threshold }}%).</p>
+                <p>Try adjusting the threshold and re-analyzing the data.</p>
+            </div>
+            {% endif %}
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2025 Stock Anomaly Detection | Advanced Analytics & Predictions</p>
+            <p style="margin-top: 10px; font-size: 0.9em;">
+                ✓ Processing Complete | ✓ Predictions Generated | ✓ Visualizations Rendered
+            </p>
+        </footer>
+    </div>
+
+    <!-- Scroll to Top Button -->
+    <button id="scrollTopBtn" class="scroll-top-btn" onclick="scrollToTop()">
+        ↑ Top
+    </button>
+
+    <!-- Render Plotly chart -->
+    <script>
+        // Scroll to top of page on load
+        window.scrollTo(0, 0);
+        
+        // Render Plotly charts
+        var graphData = {{ graph_json|safe }};
+        Plotly.newPlot('stockChart', graphData.data, graphData.layout, {
+            responsive: true,
+            displayModeBar: true,
+            displaylogo: false,
+            modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d']
+        });
+
+        // Show scroll to top button when scrolling
+        window.onscroll = function() {
+            const btn = document.getElementById('scrollTopBtn');
+            if (document.body.scrollTop > 200 || document.documentElement.scrollTop > 200) {
+                btn.style.display = 'block';
+            } else {
+                btn.style.display = 'none';
+            }
+        };
+
+        function scrollToTop() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        }
+
+        // Log successful render
+        console.log('✅ Dashboard loaded successfully');
+        console.log('📊 Charts rendered');
+        console.log('🔮 Predictions displayed');
+
+        // ============================================
+        // WINDOWING FUNCTIONALITY
+        // ============================================
+        
+        // Handle window form submission
+        document.getElementById('windowForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const windowType = document.getElementById('windowType').value;
+            const statusDiv = document.getElementById('windowStatus');
+            
+            console.log('Applying window:', startDate, 'to', endDate, 'Type:', windowType);
+            
+            // Validate dates
+            if (new Date(startDate) > new Date(endDate)) {
+                statusDiv.className = 'window-status show error';
+                statusDiv.innerHTML = '❌ Error: Start date must be before end date';
+                return;
+            }
+            
+            // Show loading
+            statusDiv.className = 'window-status show info';
+            statusDiv.innerHTML = '⏳ Applying time window filter...';
+            
+            try {
+                // Send request to filter data
+                const formData = new FormData();
+                formData.append('start_date', startDate);
+                formData.append('end_date', endDate);
+                formData.append('window_type', windowType);
+                
+                const response = await fetch('/apply_window', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error || 'Failed to apply window filter');
+                }
+                
+                if (result.success) {
+                    // Show success and reload page
+                    statusDiv.className = 'window-status show success';
+                    statusDiv.innerHTML = `✅ Window applied! Showing ${result.records} records from ${startDate} to ${endDate} (${windowType}). Refreshing...`;
+                    
+                    // Reload page to show filtered data
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+                
+            } catch (error) {
+                statusDiv.className = 'window-status show error';
+                statusDiv.innerHTML = `❌ Error: ${error.message}`;
+                console.error('Window error:', error);
+            }
+        });
+        
+        // Handle reset button
+        document.getElementById('resetWindow').addEventListener('click', function() {
+            const statusDiv = document.getElementById('windowStatus');
+            statusDiv.className = 'window-status show info';
+            statusDiv.innerHTML = '⏳ Resetting to full data range...';
+            
+            // Reset the window by clearing session
+            fetch('/reset_window', { method: 'POST' })
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        statusDiv.className = 'window-status show success';
+                        statusDiv.innerHTML = '✅ Reset complete! Showing all data. Refreshing...';
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
+                })
+                .catch(error => {
+                    statusDiv.className = 'window-status show error';
+                    statusDiv.innerHTML = `❌ Error: ${error.message}`;
+                });
+        });
+    </script>
+</body>
+</html>
